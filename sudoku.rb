@@ -1,218 +1,235 @@
+require 'set'
 
+# a Sudoku Grid
+# Holds the actual data values
+class Grid
 
-class Cell
+	CELL_RANGE = (0...9*9)
+	ROW_RANGE = (0...9)
+	COLUMN_RANGE = (0...9)
+	BOX_RANGES = [[0..2, 0..2], [0..2, 3..5], [0..2, 6..8], 
+				  [3..5, 0..2], [3..5, 3..5], [3..5, 6..8], 
+				  [6..8, 0..2], [6..8, 3..5], [6..8, 6..8]]
 
-	attr_accessor :value
-	attr_reader :possibles
+	attr_reader :cells, :rows, :columns, :boxes
 
 	def initialize
-		@value = nil
-		@possibles = []
+		@cells = CELL_RANGE.map { |idx| Cell.new(*idx_to_xy(idx)) }
+		@rows = ROW_RANGE.map { |row| Row.new(@cells.select { |cell| cell.x == row }) }
+		@columns = COLUMN_RANGE.map { |column| Column.new(@cells.select { |cell| cell.y == column }) }
+		@boxes = BOX_RANGES.map { |v|
+					Box.new(v, @cells.select { |cell|
+						v[0] === cell.x and v[1] === cell.y
+					})
+				 }
 	end
 
-	def add_possible(value)
-		@possibles << value if !@possibles.include?(value)
+	def cell_at(x, y)
+		@cells[xy_to_idx(x, y)]
+	end
+	
+	def row(y)
+		@rows[y]
 	end
 
-	def remove_possible(value)
-		@possibles.delete(value)
+	def column(x)
+		@columns[x]
 	end
 
-	def clear_possibles
-		@possibles = []
+	def box_for(x, y) 
+		@boxes.select { |box| box.x_range === x and box.y_range === y }
+	end
+
+	def pretty_print
+		row_sep = '++---+---+---++---+---+---++---+---+---++'
+		row = -1
+		@cells.each { |cell|
+			if row != cell.x
+				printf("\n%s\n", (cell.x % 3 == 0) ? row_sep.gsub(/-/, '=') : row_sep)
+				printf '||'
+				row = cell.x
+			end
+			printf(' %s %s', cell.value.nil? ? ' ' : cell.value.to_s, (cell.y % 3 == 2) ? '||' : '|')
+		}
+		printf("\n%s\n\n", row_sep.gsub(/-/, '='))
+	end
+
+	def xy_to_idx(x, y)
+		x * 9 + y
+	end
+
+	def idx_to_xy(idx)
+		[(idx / 9), (idx % 9)]
 	end
 
 end
 
-class Sudoku
+# a single Cell
+class Cell
 
-	attr_reader :grid
+	attr_reader :x, :y, :possible, :value
 
-	def initialize(grid)
-		@grid = []
-		9.times { |i|
-			@grid[i] = []
-			9.times { |j|
-				@grid[i][j] = Cell.new
-			}
-		}
+	def initialize(*args)
+		@value = nil
+		@possible = Set.new
 
-		9.times { |i|
-			9.times { |j|
-				if(!grid[i][j].nil?)
-					@grid[i][j].value = grid[i][j]
-				end
-			}
-		}
+		@x = args[0]
+		@y = args[1]
 	end
 
-	def print
-		9.times { |i|
-			9.times { |j|
-				printf("%d ", @grid[i][j].value) if !@grid[i][j].value.nil?
-				printf("_ ") if @grid[i][j].value.nil?
-			}
-			printf "\n"
-		}
+	def value=(val)
+		@value = val
+		@possible = Set.new 
+	end
+
+	def add_possible(val)
+		@possible << val
+	end
+end
+
+module CellCollection
+	def include?(val)
+		@cells.select { |cell| cell.value == val }.length > 0
+	end
+	def possible_cells_for(val)
+		@cells.select { |cell| cell.possible.include?(val) }
+	end
+end
+
+# a 3x3 Cell Box
+class Box
+	attr_reader :x_range, :y_range, :cells
+	include CellCollection
+	def initialize(*args)
+		@x_range = args[0][0]
+		@y_range = args[0][1]
+		@cells = args[1]
+	end
+end
+
+# a 1x9 Row
+class Row
+	attr_accessor :cells
+	include CellCollection
+	def initialize(cells)
+		@cells = cells
+	end
+end
+
+# a 1x9 Column
+class Column
+	attr_accessor :cells
+	include CellCollection
+	def initialize(cells)
+		@cells = cells
 	end
 end
 
 class Solver
-	def initialize(soduku)
-		@soduku = soduku
-		@grid = soduku.grid
-	end
-
-	def initialize_candidates
-		# For each box without a value,
-		# build up a list of candidates
-		9.times { |i|
-			9.times { |j|
-				(1..9).each {|val|
-					@grid[i][j].add_possible(val) if check_value(val, i, j)
-				} if @grid[i][j].value.nil?
-			}
-		}
+	def initialize(grid)
+		@grid = grid
 	end
 
 	def solve
-		cond = true
-		while cond
-			initialize_candidates
-			locked_candidates_1
-			cond = singles
-		end
-		@soduku.print
+		initialize_possibles
+		singles
+		hidden_singles
 	end
 
-	def each_in_row(i)
-		@grid[i].each { |x|
-			yield x.value if !x.value.nil?
-		}
-	end
-
-	def each_in_col(j)
-		9.times { |i|
-			x = @grid[i][j]
-			yield x.value if !x.value.nil?
-		}
-	end
-
-	def each_in_box(i, j)
-		box = [(0..2), (3..5), (6..8)]
-		box.select { |x| x === i }[0].each { |i|
-			box.select { |x| x === j }[0].each { |j|
-				yield @grid[i][j].value
-			}
-		}
-	end
-
-	def each_box_range
-		box = [(0..2), (3..5), (6..8)]
-		box.each { |i|
-			box.each { |j|
-				yield i, j # yield the ranges for the box
-			}
-		}
-	end
-
-	def check_value(val, i, j)
-		each_in_row(i) { |x|
-			return false if x == val
-		}
-		each_in_col(j) { |x|
-			return false if x == val
-		}
-		each_in_box(i,j) { |x|
-			return false if x == val
-		}
-		return true
-	end
-
-=begin
-Singles:
-Any cells which have one candidate can safley be assigned a
-value.
-=end
-	def singles
-		found_something = false
-		@grid.each { |row|
-			row.each { |cell|
-				if cell.possibles.length == 1
-					found_something = true
-					cell.value = cell.possibles[0] 
-					cell.clear_possibles
-				end
-			}
-		}
-		return found_something
-	end
-
-=begin
-Locked Candidates (1)
-look for locked candidates and remove the numbers 
-from the list of possibles.
-=end
-	def locked_candidates_1
-
-		# Look for locked candidates
-		# these rely on values in other box's only appearing in
-		# 1 column or row in a box
-		each_box_range { |i_range, j_range|
-			(1..9).each { |val|
-				# the columns and rows these values appear in
-				# if these == 1 then we have to investigate further
-				rows = []
-				columns = []
-				i_range.each{ |i|
-					j_range.each {|j|
-						if @grid[i][j].possibles.include?(val)
-							rows << i if !rows.include?(i)
-							columns << j if !columns.include?(i)
-						end
-					}
+	def initialize_possibles
+		@grid.cells.each { |cell|
+			if cell.value.nil?
+				(1..9).each { |val|
+					if !@grid.row(cell.x).include?(val) and !@grid.column(cell.y).include?(val) and !@grid.box_for(cell.x, cell.y).include?(val)
+						cell.add_possible(val)
+					end
 				}
+			end
+		}
+	end
+	
+	# assign a value to a cell with only 1 possible
+	def singles
+		@grid.cells.each { |cell|
+			if cell.possible.length == 1
+				p "found a single"
+				cell.value = cell.possible.to_a.first
+			end
+		}
+	end
 
-				if rows.length == 1
-					# with the exception of cells in
-					# this j_range, remove all val's
-					# from the possibles of anything else
-					# in this row
-					i = rows[0]
-					@grid[i].each_index { |j|
-						if !(j_range === j)
-							p "removed locked candidate 1 ("+i.to_s+", "+j.to_s+" = "+val.to_s+")"
-							@grid[i][j].remove_possible(val)
-						end
-					}
-				end
-				if columns.length == 1
-					# same as before but for cols
-					j = columns[0]
-					9.times { |i|
-						if !(i_range === i)
-							p "removed locked candidate 1 ("+i.to_s+", "+j.to_s+" = "+val.to_s+")"
-							@grid[i][j].remove_possible(val)
-						end
-					}
-				end
+	# assign a value if a box, row or column only has 1 possible for a value
+	def hidden_singles
+		fn = lambda { |collection|
+			(1..9).map { |val| {:val => val, :cells => collection.possible_cells_for(val)} }.select { |hash| hash[:cells].length == 1}.each { |v|
+				v[:cells].each { |cell|
+					p "found a hidden signal"
+					cell.value = v[:val]
+				}
 			}
 		}
+		@grid.rows.each(&fn)
+		@grid.columns.each(&fn)
+		@grid.boxes.each(&fn)
 	end
 
 end
 
-raw = [
-		[nil, nil, nil, nil, nil, nil, nil,nil, nil],
-		[nil, nil, 7, 8, 3, nil, 9, nil, nil],
-		[nil, nil, 5, nil, nil, 2, 6, 4, nil],
-		[nil, nil, 2, 6, nil, nil, nil, 7, nil],
-		[nil, 4, nil, nil, nil, nil, nil, 8, nil],
-		[nil, 6, nil, nil, nil, 3, 2, nil, nil],
-		[nil, 2, 8, 4, nil, nil, 5, nil, nil],
-		[nil, nil, nil, nil, 9, 6, 1, nil, nil],
-		[nil, nil, nil, nil, nil, nil, nil,nil, nil]
-]
+g = Grid.new
 
-s = Solver.new(Sudoku.new(raw))
+g.cell_at(1,2).value = 7
+g.cell_at(1,3).value = 8
+g.cell_at(1,4).value = 3
+g.cell_at(1,6).value = 9
+
+g.cell_at(2,2).value = 5
+g.cell_at(2,5).value = 2
+g.cell_at(2,6).value = 6
+g.cell_at(2,7).value = 4
+
+g.cell_at(3,2).value = 2
+g.cell_at(3,3).value = 6
+g.cell_at(3,7).value = 7
+
+g.cell_at(4,1).value = 4
+g.cell_at(4,7).value = 8
+
+g.cell_at(5,1).value = 6
+g.cell_at(5,5).value = 3
+g.cell_at(5,6).value = 2
+
+g.cell_at(6,1).value = 2
+g.cell_at(6,2).value = 8
+g.cell_at(6,3).value = 4
+g.cell_at(6,6).value = 5
+
+g.cell_at(7,4).value = 9
+g.cell_at(7,5).value = 6
+g.cell_at(7,6).value = 1
+
+=begin
+# Should find a 9 in 0,0 through single
+g.cell_at(1,0).value = 1
+g.cell_at(2,0).value = 2
+g.cell_at(3,0).value = 3
+g.cell_at(4,0).value = 4
+g.cell_at(5,0).value = 5
+g.cell_at(6,0).value = 6
+g.cell_at(7,0).value = 7
+g.cell_at(8,0).value = 8
+=end
+
+=begin
+g.cell_at(1,3).value = 1
+g.cell_at(2,6).value = 1
+g.cell_at(3,1).value = 1
+g.cell_at(6,2).value = 1
+=end
+
+g.pretty_print
+
+s = Solver.new(g)
 s.solve
+
+
+g.pretty_print
