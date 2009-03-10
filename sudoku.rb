@@ -37,7 +37,21 @@ class Grid
 	end
 
 	def box_for(x, y) 
-		@boxes.select { |box| box.x_range === x and box.y_range === y }
+		@boxes.select { |box| box.x_range === x and box.y_range === y }.first
+	end
+
+	# From any cell in this cells row/col/box, remove the cell's
+	# value from the possible list
+	def adjust_possibles(cell) 
+		row(cell.x).cells.each { |c|
+			c.remove_possible(cell.value)
+		}
+		column(cell.y).cells.each { |c|
+			c.remove_possible(cell.value)
+		}
+		box_for(cell.x, cell.y).cells.each { |c|
+			c.remove_possible(cell.value)
+		}
 	end
 
 	def pretty_print
@@ -82,9 +96,18 @@ class Cell
 		@possible = Set.new 
 	end
 
+	def clear_possible
+		@possible = Set.new 
+	end
+
 	def add_possible(val)
 		@possible << val
 	end
+
+	def remove_possible(val)
+		@possible.delete(val)
+	end
+
 end
 
 module CellCollection
@@ -131,16 +154,29 @@ class Solver
 	end
 
 	def solve
+
 		initialize_possibles
-		singles
-		hidden_singles
+
+		values_set, last = -1, 0
+		while values_set != last
+			last = values_set
+
+			singles
+			hidden_singles
+
+			values_set = @grid.cells.select { |c| !c.value.nil? }.length
+		end
 	end
 
 	def initialize_possibles
+
 		@grid.cells.each { |cell|
+			cell.clear_possible
 			if cell.value.nil?
 				(1..9).each { |val|
-					if !@grid.row(cell.x).include?(val) and !@grid.column(cell.y).include?(val) and !@grid.box_for(cell.x, cell.y).include?(val)
+					if !@grid.row(cell.x).include?(val) \
+						and !@grid.column(cell.y).include?(val) \
+						and !@grid.box_for(cell.x, cell.y).include?(val)
 						cell.add_possible(val)
 					end
 				}
@@ -152,8 +188,9 @@ class Solver
 	def singles
 		@grid.cells.each { |cell|
 			if cell.possible.length == 1
-				p "found a single"
+				#p "found a single"
 				cell.value = cell.possible.to_a.first
+				@grid.adjust_possibles(cell)
 			end
 		}
 	end
@@ -163,8 +200,9 @@ class Solver
 		fn = lambda { |collection|
 			(1..9).map { |val| {:val => val, :cells => collection.possible_cells_for(val)} }.select { |hash| hash[:cells].length == 1}.each { |v|
 				v[:cells].each { |cell|
-					p "found a hidden signal"
+					#p "found a hidden signal"
 					cell.value = v[:val]
+					@grid.adjust_possibles(cell)
 				}
 			}
 		}
@@ -226,10 +264,16 @@ g.cell_at(3,1).value = 1
 g.cell_at(6,2).value = 1
 =end
 
+print "=======================\n"
+print " Beginning With"
+print "=======================\n"
 g.pretty_print
 
 s = Solver.new(g)
 s.solve
 
-
+print "=======================\n"
+print " Ending With\n"
+print "=======================\n"
 g.pretty_print
+
