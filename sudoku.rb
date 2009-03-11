@@ -108,6 +108,12 @@ class Cell
 		@possible.delete(val)
 	end
 
+	# Useful if we want to test a case by creating a sample grid 
+	# with sample possible values.
+	def debug_possible(vals)
+		@possible = Set.new(vals)
+	end
+
 end
 
 module CellCollection
@@ -161,8 +167,12 @@ class Solver
 		while values_set != last
 			last = values_set
 
-			singles
+			# Possible Removers
+			naked_pairs
+			
+			# Value Setters
 			hidden_singles
+			singles
 
 			values_set = @grid.cells.select { |c| !c.value.nil? }.length
 		end
@@ -171,7 +181,6 @@ class Solver
 	def initialize_possibles
 
 		@grid.cells.each { |cell|
-			cell.clear_possible
 			if cell.value.nil?
 				(1..9).each { |val|
 					if !@grid.row(cell.x).include?(val) \
@@ -203,6 +212,35 @@ class Solver
 					#p "found a hidden signal"
 					cell.value = v[:val]
 					@grid.adjust_possibles(cell)
+				}
+			}
+		}
+		@grid.rows.each(&fn)
+		@grid.columns.each(&fn)
+		@grid.boxes.each(&fn)
+	end
+
+	def naked_pairs
+		fn = lambda { |collection|
+			pairs = Set.new
+			collection.cells.each { |cell|
+				if cell.possible.length == 2
+					collection.cells.each { |cell2|
+						# If they contain the same 2 candidates
+						if cell.possible == cell2.possible and !cell.equal?(cell2)
+							#p "Found a naked pair"
+							pairs << cell.possible
+						end
+					} 
+				end
+			}
+			pairs.each { |pair|
+				collection.cells.each { |cell|
+					if pair != cell.possible
+						pair.each { |v|
+							cell.remove_possible(v)
+						}
+					end
 				}
 			}
 		}
@@ -262,6 +300,20 @@ g.cell_at(1,3).value = 1
 g.cell_at(2,6).value = 1
 g.cell_at(3,1).value = 1
 g.cell_at(6,2).value = 1
+=end
+
+=begin
+# Values, then possibles
+g.cell_at(0,0).value = 7
+g.cell_at(0,4).value = 9
+g.cell_at(0,8).value = 3
+
+g.cell_at(0,1).debug_possible([1,2,4,5])
+g.cell_at(0,2).debug_possible([1,4,5])
+g.cell_at(0,3).debug_possible([2,4,5])
+g.cell_at(0,5).debug_possible([8,6])
+g.cell_at(0,6).debug_possible([8,6])
+g.cell_at(0,7).debug_possible([1,6,8])
 =end
 
 print "=======================\n"
