@@ -127,32 +127,49 @@ end
 
 # a 3x3 Cell Box
 class Box
-	attr_reader :x_range, :y_range, :cells
+
+	ROW_RANGE = (0...3)
+	COLUMN_RANGE = (0...3)
+
+	attr_reader :x_range, :y_range, :cells, :rows, :columns
+
 	include CellCollection
+
 	def initialize(*args)
 		@x_range = args[0][0]
 		@y_range = args[0][1]
 		@cells = args[1]
+
+		@rows = ROW_RANGE.map { |row| Row.new(@cells.select { |cell| row + @x_range.first == cell.x }) }
+		@columns = COLUMN_RANGE.map { |column| Column.new(@cells.select { |cell| column + @y_range.first == cell.y }) }
+		
 	end
+
+	# this operation works relative to the top of the box.
+	# i.e. box 2 (top middle box) cell 0,0 is actually grid cell 0,3
+	def cell_at(x, y)
+		@cells.select { |cell| cell.x == @x_range.first + x and cell.y == @y_range.first + y }.first
+	end
+
 end
 
-# a 1x9 Row
 class Row
 	attr_accessor :cells
 	include CellCollection
 	def initialize(cells)
 		@cells = cells
 	end
-end
 
-# a 1x9 Column
-class Column
-	attr_accessor :cells
-	include CellCollection
-	def initialize(cells)
-		@cells = cells
+	# Returns a set of all the possible values which can 
+	# occupy this row
+	def possible
+		@cells.inject(Set.new) { |row_set, cell|
+			row_set.merge(cell.possible)
+		}
 	end
+
 end
+Column = Row # Column Class == Row Class
 
 class Solver
 	def initialize(grid)
@@ -169,6 +186,7 @@ class Solver
 
 			# Possible Removers
 			naked_pairs
+			locked_candidate_1
 			
 			# Value Setters
 			hidden_singles
@@ -249,10 +267,93 @@ class Solver
 		@grid.boxes.each(&fn)
 	end
 
+	def locked_candidate_1
+
+		# for each column/row in a box, look for 
+		# values which only appear in that col/row of the box.
+		# we can then remove these values from every other cell 
+		# in the row/col (out of the box)
+		@grid.boxes.each { |box|
+			# ROWS
+			box.rows.each { |row|
+				diff_set = row.possible
+				box.rows.each { |row2|
+					if !row.equal?(row2)
+						diff_set = diff_set - row2.possible
+					end
+				}
+				# Diff set contains a list of values in this box row which
+				# are not in any other row in the box. we can remove them
+				# from the cells in the row that are outside of the box
+				@grid.row(row.cells.first.x).cells.each { |cell|
+					if !row.cells.include?(cell)
+						diff_set.each { |v|
+							#p "Removing Locked Candidate"
+							cell.remove_possible(v)
+						}
+					end
+				}
+			}
+			# COLUMNS
+			box.columns.each { |column|
+				diff_set = column.possible
+				box.columns.each { |column2|
+					if !column.equal?(column2)
+						diff_set = diff_set - column2.possible
+					end
+				}
+				# Diff set contains a list of values in this box column which
+				# are not in any other column in the box. we can remove them
+				# from the cells in the column that are outside of the box
+				@grid.column(column.cells.first.y).cells.each { |cell|
+					if !column.cells.include?(cell)
+						diff_set.each { |v|
+							#p "Removing Locked Candidate"
+							cell.remove_possible(v)
+						}
+					end
+				}
+			}
+		}
+	end
 end
 
 g = Grid.new
 
+g.cell_at(0,1).value = 7
+g.cell_at(0,6).value = 8
+
+g.cell_at(1,3).value = 2
+g.cell_at(1,5).value = 4
+
+g.cell_at(2,2).value = 6
+g.cell_at(2,7).value = 3
+
+g.cell_at(3,3).value = 5
+g.cell_at(3,8).value = 6
+
+g.cell_at(4,0).value = 9
+g.cell_at(4,2).value = 8
+g.cell_at(4,5).value = 2
+g.cell_at(4,7).value = 4
+
+g.cell_at(5,1).value = 5
+g.cell_at(5,4).value = 3
+g.cell_at(5,6).value = 9
+
+g.cell_at(6,2).value = 2
+g.cell_at(6,4).value = 8
+g.cell_at(6,7).value = 6
+
+g.cell_at(7,1).value = 6
+g.cell_at(7,3).value = 9
+g.cell_at(7,6).value = 7
+g.cell_at(7,8).value = 1
+
+g.cell_at(8,0).value = 4
+g.cell_at(8,5).value = 3
+
+=begin
 g.cell_at(1,2).value = 7
 g.cell_at(1,3).value = 8
 g.cell_at(1,4).value = 3
@@ -282,6 +383,7 @@ g.cell_at(6,6).value = 5
 g.cell_at(7,4).value = 9
 g.cell_at(7,5).value = 6
 g.cell_at(7,6).value = 1
+=end
 
 =begin
 # Should find a 9 in 0,0 through single
